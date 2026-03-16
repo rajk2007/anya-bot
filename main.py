@@ -1,9 +1,7 @@
 import os
 import logging
-import asyncio
-from flask import Flask, request, jsonify
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import requests
+from flask import Flask, request
 import google.generativeai as genai
 
 # Config
@@ -26,82 +24,79 @@ chat_histories = {}
 # Flask app
 flask_app = Flask(__name__)
 
-# Telegram app
-ptb_app = Application.builder().token(BOT_TOKEN).build()
+def send_message(chat_id, text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(url, json={"chat_id": chat_id, "text": text})
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Hi! I'm Anya 🌸 Your personal AI assistant!\nJust talk to me and I'll respond.\n\nCommands:\n/start - Start\n/help - Help\n/clear - Clear chat history"
-    )
+def send_typing(chat_id):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendChatAction"
+    requests.post(url, json={"chat_id": chat_id, "action": "typing"})
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Just send me any message and I'll reply using AI! 🤖\n/clear to reset our conversation."
-    )
+def set_webhook():
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
+    webhook = f"{WEBHOOK_URL}/{BOT_TOKEN}"
+    r = requests.post(url, json={"url": webhook})
+    logger.info(f"Webhook set: {r.json()}")
 
-async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    chat_histories[user_id] = []
-    await update.message.reply_text("Chat history cleared! Let's start fresh 🌸")
+@flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    data = request.get_json()
+    
+    if "message" not in data:
+        return "OK"
+    
+    message = data["message"]
+    chat_id = message["chat"]["id"]
+    
+    if "text" not in message:
+        return "OK"
+    
+    text = message["text"]
+    user_id = message["from"]["id"]
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    user_message = update.message.text
+    # Commands
+    if text == "/start":
+        send_message(chat_id, "Hi! I'm Anya 🌸 Your personal AI assistant!\nJust talk to me and I'll respond.\n\nCommands:\n/start - Start\n/help - Help\n/clear - Clear chat history")
+        return "OK"
+    
+    if text == "/help":
+        send_message(chat_id, "Just send me any message and I'll reply using AI! 🤖\n/clear to reset our conversation.")
+        return "OK"
+    
+    if text == "/clear":
+        chat_histories[user_id] = []
+        send_message(chat_id, "Chat history cleared! Let's start fresh 🌸")
+        return "OK"
 
+    # AI response
+    send_typing(chat_id)
+    
     if user_id not in chat_histories:
         chat_histories[user_id] = []
 
     try:
         chat = model.start_chat(history=chat_histories[user_id])
-        response = chat.send_message(user_message)
+        response = chat.send_message(text)
         reply = response.text
 
-        chat_histories[user_id].append({"role": "user", "parts": [user_message]})
+        chat_histories[user_id].append({"role": "user", "parts": [text]})
         chat_histories[user_id].append({"role": "model", "parts": [reply]})
 
         if len(chat_histories[user_id]) > 20:
             chat_histories[user_id] = chat_histories[user_id][-20:]
 
-        await update.message.reply_text(reply)
+        send_message(chat_id, reply)
 
     except Exception as e:
-        logger.error(f"Gemini error: {e}")
-        await update.message.reply_text("Oops! Something went wrong. Try again 🌸")
+        logger.error(f"Error: {e}")
+        send_message(chat_id, "Oops! Something went wrong. Try again 🌸")
 
-# Register handlers
-ptb_app.add_handler(CommandHandler("start", start))
-ptb_app.add_handler(CommandHandler("help", help_cmd))
-ptb_app.add_handler(CommandHandler("clear", clear))
-ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-@flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    data = request.get_json()
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        update = Update.de_json(data, ptb_app.bot)
-        loop.run_until_complete(ptb_app.process_update(update))
-    finally:
-        loop.close()
-    return jsonify({"ok": True})
+    return "OK"
 
 @flask_app.route("/")
 def index():
     return "Anya Bot is running! 🌸"
 
-def setup_webhook():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(ptb_app.initialize())
-        loop.run_until_complete(
-            ptb_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
-        )
-        logger.info(f"Webhook set to {WEBHOOK_URL}/{BOT_TOKEN}")
-    finally:
-        loop.close()
-
 if __name__ == "__main__":
-    setup_webhook()
+    set_webhook()
     flask_app.run(host="0.0.0.0", port=PORT, debug=False)
