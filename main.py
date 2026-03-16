@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Gemini setup
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Chat history store
 chat_histories = {}
@@ -41,16 +41,16 @@ def set_webhook():
 @flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
-    
+
     if "message" not in data:
         return "OK"
-    
+
     message = data["message"]
     chat_id = message["chat"]["id"]
-    
+
     if "text" not in message:
         return "OK"
-    
+
     text = message["text"]
     user_id = message["from"]["id"]
 
@@ -58,11 +58,11 @@ def webhook():
     if text == "/start":
         send_message(chat_id, "Hi! I'm Anya 🌸 Your personal AI assistant!\nJust talk to me and I'll respond.\n\nCommands:\n/start - Start\n/help - Help\n/clear - Clear chat history")
         return "OK"
-    
+
     if text == "/help":
         send_message(chat_id, "Just send me any message and I'll reply using AI! 🤖\n/clear to reset our conversation.")
         return "OK"
-    
+
     if text == "/clear":
         chat_histories[user_id] = []
         send_message(chat_id, "Chat history cleared! Let's start fresh 🌸")
@@ -70,7 +70,7 @@ def webhook():
 
     # AI response
     send_typing(chat_id)
-    
+
     if user_id not in chat_histories:
         chat_histories[user_id] = []
 
