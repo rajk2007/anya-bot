@@ -1,8 +1,8 @@
 import os
 import logging
 import requests
-from flask import Flask, request
 import google.generativeai as genai
+from flask import Flask, request
 
 # Config
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Gemini setup
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash-latest")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Chat history store
 chat_histories = {}
@@ -75,8 +75,15 @@ def webhook():
         chat_histories[user_id] = []
 
     try:
-        chat = model.start_chat(history=chat_histories[user_id])
-        response = chat.send_message(text)
+        # Build conversation history as text
+        history_text = ""
+        for msg in chat_histories[user_id]:
+            role = "User" if msg["role"] == "user" else "Anya"
+            history_text += f"{role}: {msg['parts'][0]}\n"
+
+        prompt = f"You are Anya, a friendly and helpful AI assistant. Be conversational, warm and helpful.\n\n{history_text}User: {text}\nAnya:"
+
+        response = model.generate_content(prompt)
         reply = response.text
 
         chat_histories[user_id].append({"role": "user", "parts": [text]})
