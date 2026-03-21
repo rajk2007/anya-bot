@@ -1,12 +1,12 @@
 import os
 import logging
 import requests
-import google.generativeai as genai
 from flask import Flask, request
+from openai import OpenAI
 
 # Config
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", 8080))
 
@@ -14,9 +14,11 @@ PORT = int(os.environ.get("PORT", 8080))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Gemini setup
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+# NVIDIA NIM setup
+client = OpenAI(
+    base_url="https://integrate.api.nvidia.com/v1",
+    api_key=NVIDIA_API_KEY
+)
 
 # Chat history store
 chat_histories = {}
@@ -75,19 +77,32 @@ def webhook():
         chat_histories[user_id] = []
 
     try:
-        # Build conversation history as text
-        history_text = ""
+        # Build messages for NVIDIA NIM
+        messages = [
+            {"role": "system", "content": "You are Anya, a friendly and helpful AI assistant. Be conversational, warm and helpful."}
+        ]
+
+        # Add chat history
         for msg in chat_histories[user_id]:
-            role = "User" if msg["role"] == "user" else "Anya"
-            history_text += f"{role}: {msg['parts'][0]}\n"
+            messages.append({
+                "role": msg["role"],
+                "content": msg["parts"][0]
+            })
 
-        prompt = f"You are Anya, a friendly and helpful AI assistant. Be conversational, warm and helpful.\n\n{history_text}User: {text}\nAnya:"
+        # Add current message
+        messages.append({"role": "user", "content": text})
 
-        response = model.generate_content(prompt)
-        reply = response.text
+        response = client.chat.completions.create(
+            model="google/gemma-2-27b-it",
+            messages=messages,
+            max_tokens=1024,
+            temperature=0.7
+        )
+
+        reply = response.choices[0].message.content
 
         chat_histories[user_id].append({"role": "user", "parts": [text]})
-        chat_histories[user_id].append({"role": "model", "parts": [reply]})
+        chat_histories[user_id].append({"role": "assistant", "parts": [reply]})
 
         if len(chat_histories[user_id]) > 20:
             chat_histories[user_id] = chat_histories[user_id][-20:]
